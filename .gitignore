@@ -177,4 +177,3 @@ pyrightconfig.json
 .env
 PLAN.md
 data/indexes/
-*.faiss
