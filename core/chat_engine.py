@@ -1,7 +1,6 @@
 import re
 
 from .alita import AlitaEngine
-from utils.voice_io import VoiceIO
 
 
 def build_sliding_window(history, use_memory: bool, max_tokens: int):
@@ -324,32 +323,18 @@ class ChatAlita(AlitaEngine):
         max_history_tokens=1500,
         debug=True,
         model="openai/gpt-oss-20b",
-        voice=False,
-        voice_input=False,
-        voice_debug=False,
-        voice_mic_index=None,
-        voice_phrase_limit=None,
     ):
         history = [{"role": "system", "content": system_prompt}]
         tool_runner = (
             tools if hasattr(tools, "execute_tool_call") else _normalize_tools(tools)
         )
         current_focus = {"product_id": None, "product_name": None}
-        voice_io = VoiceIO(
-            enabled=voice,
-            mic_device_index=voice_mic_index,
-            phrase_time_limit=voice_phrase_limit,
-            debug=voice_debug,
-        )
 
         if debug:
             print("[+] Debug logging: ON")
 
         while True:
-            if voice_input:
-                user_input = voice_io.listen()
-            else:
-                user_input = input("\nYou: ")
+            user_input = input("\nYou: ")
             if user_input.lower() in ["quit", "exit"]:
                 break
 
@@ -358,7 +343,6 @@ class ChatAlita(AlitaEngine):
             ):
                 response_text = f"Your customer ID is {tools.customer_id}."
                 print(f"Alita: {response_text}")
-                voice_io.speak(response_text)
                 history.append({"role": "assistant", "content": response_text})
                 continue
 
@@ -373,7 +357,6 @@ class ChatAlita(AlitaEngine):
                 else:
                     response_text = "Which product would you like to buy?"
                 print(f"Alita: {response_text}")
-                voice_io.speak(response_text)
                 history.append({"role": "assistant", "content": response_text})
                 continue
 
@@ -478,7 +461,6 @@ class ChatAlita(AlitaEngine):
                 if tool_message:
                     history.append({"role": "assistant", "content": tool_message})
                 print(f"Alita: {response_text}")
-                voice_io.speak(response_text)
                 history.append({"role": "assistant", "content": response_text})
                 continue
 
@@ -517,7 +499,6 @@ class ChatAlita(AlitaEngine):
                                     {"role": "assistant", "content": tool_message}
                                 )
                             print(f"Alita: {response_text}")
-                            voice_io.speak(response_text)
                             history.append(
                                 {"role": "assistant", "content": response_text}
                             )
@@ -540,7 +521,6 @@ class ChatAlita(AlitaEngine):
                 if tool_message:
                     history.append({"role": "assistant", "content": tool_message})
                 print(f"Alita: {response_text}")
-                voice_io.speak(response_text)
                 history.append({"role": "assistant", "content": response_text})
                 continue
 
@@ -574,7 +554,6 @@ class ChatAlita(AlitaEngine):
                 if tool_message:
                     history.append({"role": "assistant", "content": tool_message})
                 print(f"Alita: {response_text}")
-                voice_io.speak(response_text)
                 history.append({"role": "assistant", "content": response_text})
                 continue
 
@@ -626,5 +605,4 @@ class ChatAlita(AlitaEngine):
                     )
 
             print(f"Alita: {response_text}")
-            voice_io.speak(response_text)
             history.append({"role": "assistant", "content": response_text})
