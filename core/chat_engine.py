@@ -1,3 +1,4 @@
+import json
 import re
 
 from .alita import AlitaEngine
@@ -64,6 +65,31 @@ def _execute_tool_calls(tool_calls, tool_runner, default_query, debug=False):
         outputs.append(f"[{tool_name} results]:\n{result}")
 
     return "\n".join(outputs).strip()
+
+
+def _format_action_result(tool_name: str, raw_result: str) -> str:
+    try:
+        payload = json.loads(raw_result)
+    except Exception:
+        return raw_result or "I couldn't complete that request."
+
+    status = payload.get("status") or "unknown"
+    message = payload.get("message") or "Request completed."
+    reason = payload.get("reason")
+    ticket_id = payload.get("ticket_id")
+
+    parts = [message]
+    if reason:
+        parts.append(f"Reason: {reason}")
+    if ticket_id:
+        parts.append(f"Ticket ID: {ticket_id}")
+
+    if status == "approved" and tool_name == "cancel_order":
+        parts.insert(0, "Your cancellation request was submitted.")
+    if status == "approved" and tool_name == "initiate_return":
+        parts.insert(0, "Your return request was submitted.")
+
+    return " ".join(part.strip() for part in parts if part).strip()
 
 
 def _needs_policy_check(text: str) -> bool:
@@ -387,6 +413,31 @@ class ChatAlita(AlitaEngine):
 
             tool_output = ""
             if plan.get("route") == "tools" and plan.get("tool_calls"):
+                action_tools = {"cancel_order", "initiate_return"}
+                if (
+                    hasattr(tool_runner, "execute_tool_call")
+                    and any(call.get("tool") in action_tools for call in plan.get("tool_calls", []))
+                ):
+                    outputs = []
+                    for call in plan.get("tool_calls", []):
+                        tool_name = call.get("tool")
+                        if tool_name not in action_tools:
+                            continue
+                        args = dict(call.get("args") or {})
+                        result = tool_runner.execute_tool_call(
+                            tool_name=tool_name,
+                            args=args,
+                            default_query=user_input,
+                        )
+                        outputs.append(_format_action_result(tool_name, result))
+                    response_text = " ".join(output for output in outputs if output) or (
+                        "I couldn't complete that request."
+                    )
+                    print(f"Alita: {response_text}")
+                    history.append({"role": "user", "content": user_input})
+                    history.append({"role": "assistant", "content": response_text})
+                    continue
+
                 print("[+] Searching...")
                 tool_output = _execute_tool_calls(
                     tool_calls=plan.get("tool_calls", []),

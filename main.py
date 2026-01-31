@@ -12,6 +12,9 @@ When the user asks about products, use the TOOL RESULTS provided to answer their
 If the data is missing or doesn't match, admit you don't know; do not hallunicate products.
 Keep answers concise, formal and helpful.
 Use as less words as possible, while being clear and informative.
+Do not use markdown, or tables, or special symbols. 
+Use plain text and frame your sentences simply such that they are easy to be spoken by text-to-speech systems.
+Do not use markdown, or tables, or special symbols. 
 """
 
 CUSTOMER_ID = "C0029"

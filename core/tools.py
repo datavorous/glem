@@ -303,6 +303,8 @@ class KnowledgeBaseTools:
 
         allowed = {"Placed", "Shipped"}
         if order.get("order_status") not in allowed:
+            status = order.get("order_status") or "Unknown"
+            reason = f"Order status is {status}, only Placed or Shipped can be cancelled."
             message = "Order is not eligible for cancellation."
             self._log_action(
                 action="cancel_order",
@@ -310,11 +312,16 @@ class KnowledgeBaseTools:
                 order_id=order_id,
                 product_id=None,
                 result="rejected",
-                message=message,
+                message=reason,
                 ticket_id=None,
             )
             return json.dumps(
-                {"status": "rejected", "message": message, "ticket_id": None},
+                {
+                    "status": "rejected",
+                    "message": message,
+                    "reason": reason,
+                    "ticket_id": None,
+                },
                 indent=2,
             )
 
@@ -356,6 +363,8 @@ class KnowledgeBaseTools:
             )
 
         if order.get("order_status") != "Delivered":
+            status = order.get("order_status") or "Unknown"
+            reason = f"Order status is {status}, only Delivered orders can be returned."
             message = "Order is not eligible for return."
             self._log_action(
                 action="initiate_return",
@@ -363,11 +372,16 @@ class KnowledgeBaseTools:
                 order_id=order_id,
                 product_id=product_id,
                 result="rejected",
-                message=message,
+                message=reason,
                 ticket_id=None,
             )
             return json.dumps(
-                {"status": "rejected", "message": message, "ticket_id": None},
+                {
+                    "status": "rejected",
+                    "message": message,
+                    "reason": reason,
+                    "ticket_id": None,
+                },
                 indent=2,
             )
 
