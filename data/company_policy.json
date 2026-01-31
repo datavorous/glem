@@ -1,0 +1,216 @@
+{
+  "policy_document": {
+    "return_and_refund_policies": {
+      "eligibility_and_timeline": [
+        {
+          "topic": "Return Window",
+          "clean_text": "Customers have up to 30 days from the date of delivery to request a return or exchange.",
+          "citation_ids": [88]
+        },
+        {
+          "topic": "Condition",
+          "clean_text": "Items must be unused, in their original packaging, and include all tags and proof of purchase.",
+          "citation_ids": [90]
+        },
+        {
+          "topic": "Non-Returnable Items",
+          "clean_text": "Products that are personalized, perishable, or marked as final sale are non-returnable.",
+          "citation_ids": [91]
+        },
+        {
+          "topic": "Exceptions",
+          "clean_text": "For hygiene and safety reasons, certain personal care products, consumables, and digital downloads cannot be returned.",
+          "citation_ids": [92]
+        }
+      ],
+      "process_for_returns": [
+        {
+          "topic": "Initiating a Return",
+          "segments": [
+            {
+              "clean_text": "Contact customer support with your order ID and the reason for the return.",
+              "citation_ids": [94]
+            },
+            {
+              "clean_text": "Documentation such as photos may be requested to confirm product condition.",
+              "citation_ids": [95]
+            }
+          ]
+        },
+        {
+          "topic": "Authorization",
+          "segments": [
+            {
+              "clean_text": "Once approved, you will receive a return authorization and instructions on shipping the item back.",
+              "citation_ids": [96]
+            },
+            {
+              "clean_text": "Returns sent without authorization may be refused.",
+              "citation_ids": [97]
+            }
+          ]
+        },
+        {
+          "topic": "Shipping Costs",
+          "segments": [
+            {
+              "clean_text": "We cover return shipping for items received damaged, defective, or incorrect.",
+              "citation_ids": [97]
+            },
+            {
+              "clean_text": "For change-of-mind returns, customers may be responsible for return shipping and any restocking fees.",
+              "citation_ids": [98]
+            }
+          ]
+        }
+      ],
+      "refunds_and_exchanges": [
+        {
+          "topic": "Modes of Refund",
+          "clean_text": "Refunds can be issued to the original payment method, as store credit, or by exchanging the item for another product.",
+          "citation_ids": [100]
+        },
+        {
+          "topic": "Processing Time",
+          "clean_text": "Once the returned item passes inspection, refunds are processed within 7-10 business days.",
+          "citation_ids": [101]
+        },
+        {
+          "topic": "Exchanges",
+          "segments": [
+            {
+              "clean_text": "Exchanges are subject to stock availability.",
+              "citation_ids": []
+            },
+            {
+              "clean_text": "If the requested replacement is unavailable, a refund or store credit will be offered.",
+              "citation_ids": [102]
+            }
+          ]
+        }
+      ],
+      "customer_responsibilities": [
+        {
+          "clean_text": "Customers are expected to use products as intended and not abuse the return policy.",
+          "citation_ids": [104]
+        },
+        {
+          "segments": [
+            {
+              "clean_text": "Items should be repacked securely to prevent damage in transit.",
+              "citation_ids": []
+            },
+            {
+              "clean_text": "Including all original accessories and packaging helps expedite the inspection process.",
+              "citation_ids": [105, 106]
+            }
+          ]
+        }
+      ]
+    },
+    "cancellation_rules": [
+      {
+        "topic": "Policy",
+        "segments": [
+          {
+            "clean_text": "Customers may cancel an order before it has been shipped.",
+            "citation_ids": [108]
+          },
+          {
+            "clean_text": "Once delivered, the return policy applies.",
+            "citation_ids": [109]
+          }
+        ]
+      },
+      {
+        "topic": "How to Cancel",
+        "clean_text": "Submit a cancellation request via customer support or your account dashboard using your order ID as soon as possible.",
+        "citation_ids": [110]
+      },
+      {
+        "topic": "Refund for Cancellations",
+        "segments": [
+          {
+            "clean_text": "If the order is still in processing, it will be cancelled and a refund issued.",
+            "citation_ids": [111]
+          },
+          {
+            "clean_text": "If payment has been captured, refunds are processed to the original payment method within 7-10 business days.",
+            "citation_ids": [114]
+          }
+        ]
+      },
+      {
+        "topic": "Non-Cancellable Items",
+        "clean_text": "Customized products, gift cards, and clearance items are generally not eligible for cancellation.",
+        "citation_ids": [112]
+      },
+      {
+        "topic": "After Dispatch",
+        "segments": [
+          {
+            "clean_text": "Once an order has been shipped, it cannot be cancelled.",
+            "citation_ids": []
+          },
+          {
+            "clean_text": "Instead, customers may initiate a return through the standard return process.",
+            "citation_ids": [115, 116]
+          }
+        ]
+      }
+    ],
+    "delivery_timelines": [
+      {
+        "topic": "Standard Shipping",
+        "clean_text": "Domestic orders shipped via standard shipping typically arrive within 5-7 business days.",
+        "citation_ids": [121]
+      },
+      {
+        "topic": "Express Shipping",
+        "clean_text": "Customers can choose express shipping for a faster delivery window of 3-5 business days.",
+        "citation_ids": [122]
+      },
+      {
+        "topic": "Processing Time",
+        "segments": [
+          {
+            "clean_text": "Orders are processed and dispatched within 24 hours of payment confirmation (excluding weekends and holidays).",
+            "citation_ids": [123]
+          },
+          {
+            "clean_text": "Orders placed after 4 p.m. are processed the next business day.",
+            "citation_ids": [124]
+          }
+        ]
+      },
+      {
+        "topic": "Tracking",
+        "clean_text": "Once shipped, customers will receive a tracking link via email or SMS to monitor the shipment status in real time.",
+        "citation_ids": [125]
+      },
+      {
+        "topic": "Variability",
+        "segments": [
+          {
+            "clean_text": "Delivery timelines are estimates and may vary due to weather, unforeseen logistic issues, or regional restrictions.",
+            "citation_ids": [126]
+          },
+          {
+            "clean_text": "Remote locations may require additional transit time.",
+            "citation_ids": [127]
+          }
+        ]
+      }
+    ],
+    "contact_information": [
+      {
+        "clean_text": "For questions about returns, refunds, cancellations, or delivery timelines, please contact our customer care team through the support portal or by emailing our helpdesk.",
+        "citation_ids": [129]
+      },
+      {
+        "clean_text": "We aim to respond to all enquiries within one business day.",
+        "citation_ids": [130]
+      }
+    ]
+  }
+}
