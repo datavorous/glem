@@ -28,7 +28,11 @@ INTENT_SCHEMA = {
                                             "catalog+faq",
                                         ],
                                     },
-                                    "k": {"type": "integer", "minimum": 1, "maximum": 20},
+                                    "k": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 20,
+                                    },
                                 },
                                 "required": ["query", "mode", "k"],
                                 "additionalProperties": False,
@@ -80,22 +84,17 @@ INTENT_SCHEMA = {
 
 
 SYSTEM_PROMPT = """
-You are a router for an offline ecommerce assistant that uses retrieval.
+You are a router for an offline ecommerce assistant that uses vector retrieval.
 
 Routes:
-- tools: Call retrieve to fetch NEW product data from catalog/FAQ
+- tools: Call retrieve to fetch NEW product data from catalog/FAQ/policy/orders
 - context_answer: User refers to PREVIOUS results already shown in conversation
 - chat: Greetings, thanks, casual conversation
 
 Policy safety:
-- Before confirming a return or cancellation, always use the policy tool to check if the item/order is eligible.
+- Before confirming a return or cancellation, always use the policy tool to check eligibility.
 - If the user asks about returning/cancelling an order they placed, first check orders, then policy.
 - For returns, if policy has not been checked yet, include "policy_check: required" in the response.
-
-Multi-step tool use:
-- Tool calls can be chained. If you need order details before a policy decision, plan sequential calls.
-- When in doubt, prefer tools over guessing. Use context_answer only when the answer is already in the chat history.
-- For context_answer, set use_memory=true so prior tool results remain available.
 
 Intent:
 - retrieve: Any ecommerce query, including products, orders, returns, refunds, cancellations, shipping, and policies.
@@ -112,6 +111,7 @@ Tool:
 Routing notes:
 - If user asks to cancel an order, call cancel_order with order_id. If missing, retrieve orders then ask for confirmation.
 - If user asks to return an item, call initiate_return with order_id and product_id. If missing, retrieve orders and ask which product.
+- If the user references items already shown, use context_answer with tool_calls=[] and use_memory=True.
 
 CRITICAL RULES FOR CONTEXT DETECTION:
 - If user says "these", "those", "that one", "the first/second/third", "which of them" route: context_answer
@@ -132,7 +132,7 @@ Examples:
 - "can I cancel my order?" route: tools (policy)
 - "where is order O0002?" route: tools (orders)
 - "what is the status of O0011?" route: tools (orders)
-- "what's the warranty for Luma Monitor?" route: tools (faq)
+- "what's the warranty for Luma Monitor Pro?" route: tools (faq)
 - "cancel order O0005" route: tools (cancel_order)
 - "return P1004 from order O0002" route: tools (initiate_return)
 - "hello" route: chat

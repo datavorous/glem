@@ -1,6 +1,7 @@
 import re
 
 from .alita import AlitaEngine
+from utils.voice_io import VoiceIO
 
 
 def build_sliding_window(history, use_memory: bool, max_tokens: int):
@@ -38,62 +39,31 @@ def _normalize_tools(tools):
     return registry
 
 
-def _execute_tool_calls(tool_calls, tools, default_query, debug=False, tools_obj=None):
+def _execute_tool_calls(tool_calls, tool_runner, default_query, debug=False):
     outputs = []
     for call in tool_calls:
         tool_name = call.get("tool")
         args = dict(call.get("args") or {})
-        if tool_name == "retrieve":
-            if "query" not in args:
-                args["query"] = default_query
-            mode = (args.get("mode") or "").lower()
-            if mode == "orders":
-                order_id = _extract_order_id(str(args.get("query", "")))
-                customer_id = _extract_customer_id(str(args.get("query", "")))
-                if not order_id and not customer_id:
-                    default_customer = getattr(tools_obj, "customer_id", None)
-                    if default_customer:
-                        args["query"] = default_customer
-            k_value = args.get("k", 5)
+
+        if hasattr(tool_runner, "execute_tool_call"):
+            result = tool_runner.execute_tool_call(
+                tool_name=tool_name, args=args, default_query=default_query
+            )
+        else:
+            tool_fn = tool_runner.get(tool_name)
+            if not tool_fn:
+                outputs.append(f"[Missing tool '{tool_name}']")
+                continue
+            if debug:
+                print("[LOG] tool_call =", {"tool": tool_name, "args": args})
             try:
-                k_value = int(k_value)
-            except (TypeError, ValueError):
-                k_value = 5
-            if k_value < 1 or k_value > 20:
-                k_value = 5
-            args["k"] = k_value
-        elif tool_name == "cancel_order":
-            if "order_id" not in args:
-                order_id = _extract_order_id(default_query)
-                if order_id:
-                    args["order_id"] = order_id
-        elif tool_name == "initiate_return":
-            if "order_id" not in args:
-                order_id = _extract_order_id(default_query)
-                if order_id:
-                    args["order_id"] = order_id
-            if "product_id" not in args:
-                product_id = _extract_product_id(default_query)
-                if product_id:
-                    args["product_id"] = product_id
+                result = tool_fn(**args)
+            except Exception as exc:
+                outputs.append(f"[Tool '{tool_name}' error: {exc}]")
+                continue
 
-        tool_fn = tools.get(tool_name)
-        if not tool_fn:
-            outputs.append(f"[Missing tool '{tool_name}']")
-            continue
+        outputs.append(f"[{tool_name} results]:\n{result}")
 
-        if debug:
-            print("[LOG] tool_call =", {"tool": tool_name, "args": args})
-
-        try:
-            result = tool_fn(**args)
-        except Exception as exc:
-            outputs.append(f"[Tool '{tool_name}' error: {exc}]")
-            continue
-
-        outputs.append(
-            f"[{tool_name} results]:\n{result}"
-        )
     return "\n".join(outputs).strip()
 
 
@@ -146,6 +116,28 @@ def _is_customer_id_question(text: str) -> bool:
     return "customer id" in text or "customerid" in text
 
 
+def _is_purchase_intent(text: str) -> bool:
+    if not text:
+        return False
+    text = text.lower()
+    keywords = (
+        "buy it",
+        "buy this",
+        "purchase it",
+        "purchase this",
+        "order it",
+        "order this",
+    )
+    return any(word in text for word in keywords)
+
+
+def _is_cancel_request(text: str) -> bool:
+    if not text:
+        return False
+    text = text.lower()
+    return "cancel" in text and "order" in text
+
+
 def _extract_order_id(text: str):
     if not text:
         return None
@@ -176,18 +168,24 @@ def _extract_customer_id(text: str):
 def _get_catalog_matches(tools, query: str, k: int = 5):
     if tools is None:
         return None
-    if hasattr(tools, "catalog") and hasattr(tools.catalog, "search"):
-        return tools.catalog.search(query=query, k=k)
-    if hasattr(tools, "search"):
-        return tools.search(query=query, k=k)
+    try:
+        if hasattr(tools, "catalog") and hasattr(tools.catalog, "search"):
+            return tools.catalog.search(query=query, k=k)
+        if hasattr(tools, "search"):
+            return tools.search(query=query, k=k)
+    except FileNotFoundError:
+        return []
     return None
 
 
 def _get_order_matches(tools, query: str, k: int = 5):
     if tools is None:
         return None
-    if hasattr(tools, "orders") and hasattr(tools.orders, "search"):
-        return tools.orders.search(query=query, k=k)
+    try:
+        if hasattr(tools, "orders") and hasattr(tools.orders, "search"):
+            return tools.orders.search(query=query, k=k)
+    except FileNotFoundError:
+        return []
     return None
 
 
@@ -206,7 +204,13 @@ def _resolve_generic_order_query(tools, query: str | None):
     if not query:
         return query
     normalized = query.strip().lower()
-    if normalized in {"orders", "order", "my orders", "order history", "previous orders"}:
+    if normalized in {
+        "orders",
+        "order",
+        "my orders",
+        "order history",
+        "previous orders",
+    }:
         return getattr(tools, "customer_id", None) or query
     if not _extract_order_id(query) and not _extract_customer_id(query):
         if "order" in normalized or "orders" in normalized:
@@ -217,9 +221,15 @@ def _resolve_generic_order_query(tools, query: str | None):
 def _suggest_categories(tools, limit: int = 4):
     if not tools or not hasattr(tools, "catalog"):
         return []
-    products = getattr(tools.catalog, "products", [])
+    products = getattr(tools.catalog, "index", None)
+    if not products or not hasattr(products, "items"):
+        return []
+    try:
+        items = products.items
+    except FileNotFoundError:
+        return []
     seen = []
-    for product in products:
+    for product in items:
         category = product.get("category")
         if category and category not in seen:
             seen.append(category)
@@ -314,21 +324,56 @@ class ChatAlita(AlitaEngine):
         max_history_tokens=1500,
         debug=True,
         model="openai/gpt-oss-20b",
+        voice=False,
+        voice_input=False,
+        voice_debug=False,
+        voice_mic_index=None,
+        voice_phrase_limit=None,
     ):
         history = [{"role": "system", "content": system_prompt}]
-        tool_registry = _normalize_tools(tools)
+        tool_runner = (
+            tools if hasattr(tools, "execute_tool_call") else _normalize_tools(tools)
+        )
+        current_focus = {"product_id": None, "product_name": None}
+        voice_io = VoiceIO(
+            enabled=voice,
+            mic_device_index=voice_mic_index,
+            phrase_time_limit=voice_phrase_limit,
+            debug=voice_debug,
+        )
 
         if debug:
             print("[+] Debug logging: ON")
 
         while True:
-            user_input = input("\nYou: ")
+            if voice_input:
+                user_input = voice_io.listen()
+            else:
+                user_input = input("\nYou: ")
             if user_input.lower() in ["quit", "exit"]:
                 break
 
-            if _is_customer_id_question(user_input) and getattr(tools, "customer_id", None):
+            if _is_customer_id_question(user_input) and getattr(
+                tools, "customer_id", None
+            ):
                 response_text = f"Your customer ID is {tools.customer_id}."
                 print(f"Alita: {response_text}")
+                voice_io.speak(response_text)
+                history.append({"role": "assistant", "content": response_text})
+                continue
+
+            if _is_purchase_intent(user_input):
+                if current_focus.get("product_id"):
+                    response_text = (
+                        "I can help with that. "
+                        f"You're referring to {current_focus.get('product_name', 'that item')} "
+                        f"({current_focus.get('product_id')}). "
+                        "How many would you like?"
+                    )
+                else:
+                    response_text = "Which product would you like to buy?"
+                print(f"Alita: {response_text}")
+                voice_io.speak(response_text)
                 history.append({"role": "assistant", "content": response_text})
                 continue
 
@@ -357,10 +402,9 @@ class ChatAlita(AlitaEngine):
                 print("[+] Searching...")
                 tool_output = _execute_tool_calls(
                     tool_calls=plan.get("tool_calls", []),
-                    tools=tool_registry,
+                    tool_runner=tool_runner,
                     default_query=user_input,
                     debug=debug,
-                    tools_obj=tools,
                 )
                 if debug:
                     print("[LOG] tool_output =", tool_output.strip() or "<empty>")
@@ -379,15 +423,16 @@ class ChatAlita(AlitaEngine):
                     print("[+] Searching more...")
                     followup_output = _execute_tool_calls(
                         tool_calls=followup_plan.get("tool_calls", []),
-                        tools=tool_registry,
+                        tool_runner=tool_runner,
                         default_query=user_input,
                         debug=debug,
-                        tools_obj=tools,
                     )
                     if followup_output:
                         tool_output = "\n".join(
                             part for part in [tool_output, followup_output] if part
                         )
+
+            tool_message = f"TOOL RESULTS:\n{tool_output}" if tool_output else None
 
             catalog_query = _get_retrieve_query(
                 plan.get("tool_calls", []), {"catalog", "catalog+faq"}
@@ -400,11 +445,42 @@ class ChatAlita(AlitaEngine):
                 else []
             )
             order_matches = (
-                _get_order_matches(tools, order_query, k=5) or []
-                if order_query
-                else []
+                _get_order_matches(tools, order_query, k=5) or [] if order_query else []
             )
             order_id = _extract_order_id(user_input)
+
+            if (
+                _is_cancel_request(user_input)
+                and not order_id
+                and len(order_matches) > 1
+            ):
+                active = [
+                    order
+                    for order in order_matches
+                    if order.get("order_status") not in {"Cancelled", "Returned"}
+                ]
+                choices = active if active else order_matches
+                options = []
+                for order in choices[:5]:
+                    summary = order.get("order_id", "Unknown")
+                    status = order.get("order_status")
+                    date = order.get("order_date")
+                    details = ", ".join(part for part in [status, date] if part)
+                    if details:
+                        summary += f" ({details})"
+                    options.append(summary)
+                response_text = (
+                    f"I found {len(choices)} orders. Which one would you like to cancel? "
+                    + "; ".join(options)
+                    + "."
+                )
+                history.append({"role": "user", "content": user_input})
+                if tool_message:
+                    history.append({"role": "assistant", "content": tool_message})
+                print(f"Alita: {response_text}")
+                voice_io.speak(response_text)
+                history.append({"role": "assistant", "content": response_text})
+                continue
 
             if plan.get("route") == "tools" and catalog_query and catalog_matches:
                 if len(catalog_matches) > 1:
@@ -416,10 +492,35 @@ class ChatAlita(AlitaEngine):
                     if len(names) > 1:
                         user_text = user_input.lower()
                         if not any(name.lower() in user_text for name in names):
-                            options = ", ".join(names[:2])
-                            response_text = f"Do you mean {options}?"
+                            details = []
+                            for item in catalog_matches[:3]:
+                                price = item.get("price")
+                                rating = item.get("rating")
+                                bits = []
+                                if price is not None:
+                                    bits.append(f"${price}")
+                                if rating is not None:
+                                    bits.append(f"{rating}★")
+                                summary = f"{item.get('product_name', 'Unknown')}"
+                                if bits:
+                                    summary += f" ({', '.join(bits)})"
+                                details.append(summary)
+                            response_text = (
+                                "I found a few options. "
+                                + "Here are some top matches: "
+                                + "; ".join(details)
+                                + ". Which one should I compare or describe?"
+                            )
+                            history.append({"role": "user", "content": user_input})
+                            if tool_message:
+                                history.append(
+                                    {"role": "assistant", "content": tool_message}
+                                )
                             print(f"Alita: {response_text}")
-                            history.append({"role": "assistant", "content": response_text})
+                            voice_io.speak(response_text)
+                            history.append(
+                                {"role": "assistant", "content": response_text}
+                            )
                             continue
 
             if plan.get("route") == "tools" and catalog_query and not catalog_matches:
@@ -435,9 +536,28 @@ class ChatAlita(AlitaEngine):
                         "I couldn't find a matching product. Could you clarify the "
                         "product name or category?"
                     )
+                history.append({"role": "user", "content": user_input})
+                if tool_message:
+                    history.append({"role": "assistant", "content": tool_message})
                 print(f"Alita: {response_text}")
+                voice_io.speak(response_text)
                 history.append({"role": "assistant", "content": response_text})
                 continue
+
+            if catalog_matches:
+                focus = None
+                if len(catalog_matches) == 1:
+                    focus = catalog_matches[0]
+                else:
+                    user_text = user_input.lower()
+                    for item in catalog_matches:
+                        name = item.get("product_name", "")
+                        if name and name.lower() in user_text:
+                            focus = item
+                            break
+                if focus:
+                    current_focus["product_id"] = focus.get("product_id")
+                    current_focus["product_name"] = focus.get("product_name")
 
             if plan.get("route") == "tools" and order_query and not order_matches:
                 if order_id:
@@ -450,11 +570,17 @@ class ChatAlita(AlitaEngine):
                         "I couldn't find an order. Could you share the order ID or "
                         "customer ID?"
                     )
+                history.append({"role": "user", "content": user_input})
+                if tool_message:
+                    history.append({"role": "assistant", "content": tool_message})
                 print(f"Alita: {response_text}")
+                voice_io.speak(response_text)
                 history.append({"role": "assistant", "content": response_text})
                 continue
 
             history.append({"role": "user", "content": user_input})
+            if tool_message:
+                history.append({"role": "assistant", "content": tool_message})
 
             use_memory = bool(plan.get("use_memory", True))
             current_turn_messages = build_sliding_window(
@@ -466,11 +592,11 @@ class ChatAlita(AlitaEngine):
                 print("[LOG] use_memory =", use_memory)
                 print("[LOG] window_size =", len(current_turn_messages))
 
-            if tool_output:
+            if tool_message and not use_memory:
                 current_turn_messages.append(
                     {
                         "role": "assistant",
-                        "content": f"TOOL RESULTS:\n{tool_output}",
+                        "content": tool_message,
                     }
                 )
                 if debug:
@@ -500,4 +626,5 @@ class ChatAlita(AlitaEngine):
                     )
 
             print(f"Alita: {response_text}")
+            voice_io.speak(response_text)
             history.append({"role": "assistant", "content": response_text})

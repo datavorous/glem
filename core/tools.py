@@ -1,57 +1,137 @@
 import json
-import os
 import re
 import secrets
 from datetime import datetime, timezone
+from pathlib import Path
 
 from utils.search_utils import (
-    flatten_policy,
+    EmbeddingConfig,
+    Embedder,
+    VectorIndex,
     load_json,
     normalize_query,
     parse_query,
-    rank_results,
-    score_field,
 )
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "../data")
-CATALOG_PATH = os.path.join(DATA_DIR, "product_catalog.json")
-FAQ_PATH = os.path.join(DATA_DIR, "product_faqs.json")
-POLICY_PATH = os.path.join(DATA_DIR, "company_policy.json")
-ORDERS_PATH = os.path.join(DATA_DIR, "order_database.json")
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / ".." / "data"
+INDEX_DIR = DATA_DIR / "indexes"
+
+CATALOG_PATH = DATA_DIR / "product_catalog.json"
+FAQ_PATH = DATA_DIR / "product_faqs.json"
+POLICY_PATH = DATA_DIR / "company_policy.json"
+ORDERS_PATH = DATA_DIR / "order_database.json"
+
+CATALOG_INDEX = INDEX_DIR / "catalog.faiss"
+CATALOG_META = INDEX_DIR / "catalog_meta.json"
+FAQ_INDEX = INDEX_DIR / "faq.faiss"
+FAQ_META = INDEX_DIR / "faq_meta.json"
+POLICY_INDEX = INDEX_DIR / "policy.faiss"
+POLICY_META = INDEX_DIR / "policy_meta.json"
+ORDERS_INDEX = INDEX_DIR / "orders.faiss"
+ORDERS_META = INDEX_DIR / "orders_meta.json"
 
 
-class ProductCatalogTool:
-    def __init__(self, path: str = CATALOG_PATH):
-        self.products = load_json(path, [])
+def _clamp_k(value, default: int = 5) -> int:
+    try:
+        k = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(20, k))
 
-    def search(self, query: str, k: int = 5):
+
+def _extract_order_id(text: str | None):
+    if not text:
+        return None
+    match = re.search(r"\bo\d{4}\b", text.lower())
+    if match:
+        return match.group(0).upper()
+    return None
+
+
+def _extract_product_id(text: str | None):
+    if not text:
+        return None
+    match = re.search(r"\bp\d{4}\b", text.lower())
+    if match:
+        return match.group(0).upper()
+    return None
+
+
+def _extract_customer_id(text: str | None):
+    if not text:
+        return None
+    match = re.search(r"\bc\d{4}\b", text.lower())
+    if match:
+        return match.group(0).upper()
+    return None
+
+
+class VectorSearchTool:
+    def __init__(
+        self, index_path: Path, meta_path: Path, embedder: Embedder, empty: str
+    ):
+        self.index = VectorIndex(
+            index_path=index_path, meta_path=meta_path, embedder=embedder
+        )
+        self.empty_message = empty
+
+    def search(self, query: str, k: int = 5) -> list[dict]:
+        return self.index.search(query, k=k)
+
+    def retrieve(self, query: str, k: int = 5) -> str:
+        try:
+            results = self.search(query=query, k=k)
+        except FileNotFoundError as exc:
+            return str(exc)
+        if not results:
+            return self.empty_message
+        return json.dumps(results, indent=2)
+
+
+class CatalogSearchTool(VectorSearchTool):
+    def __init__(self, index_path: Path, meta_path: Path, embedder: Embedder):
+        super().__init__(index_path, meta_path, embedder, "No matching products found.")
+
+    def search(self, query: str, k: int = 5) -> list[dict]:
         parsed = parse_query(query)
-        cleaned_query = normalize_query(parsed.get("cleaned_query", query))
+        cleaned_query = normalize_query(parsed.get("cleaned_query") or query)
+        has_numeric = any(
+            parsed.get(key) is not None
+            for key in ("max_price", "min_price", "min_rating")
+        )
         if not cleaned_query:
-            return []
+            try:
+                results = list(self.index.items)
+            except FileNotFoundError:
+                return []
+        else:
+            candidate_k = max(_clamp_k(k) * 4, 20)
+            results = self.index.search(cleaned_query, k=candidate_k)
 
-        scored = []
-        for product in self.products:
-            score = 0
-            score += score_field(cleaned_query, product.get("product_name", ""), 3)
-            score += score_field(cleaned_query, product.get("product_id", ""), 2)
-            score += score_field(cleaned_query, product.get("category", ""), 2)
-            score += score_field(cleaned_query, product.get("description", ""), 1)
-            if score > 0:
-                scored.append({"score": score, "item": product})
-
-        results = rank_results(scored, k)
         max_price = parsed.get("max_price")
         min_price = parsed.get("min_price")
         min_rating = parsed.get("min_rating")
         category = parsed.get("category")
 
         if max_price is not None:
-            results = [r for r in results if r.get("price") is not None and r["price"] <= max_price]
+            results = [
+                r
+                for r in results
+                if r.get("price") is not None and r["price"] <= max_price
+            ]
         if min_price is not None:
-            results = [r for r in results if r.get("price") is not None and r["price"] >= min_price]
+            results = [
+                r
+                for r in results
+                if r.get("price") is not None and r["price"] >= min_price
+            ]
         if min_rating is not None:
-            results = [r for r in results if r.get("rating") is not None and r["rating"] >= min_rating]
+            results = [
+                r
+                for r in results
+                if r.get("rating") is not None and r["rating"] >= min_rating
+            ]
         if category:
             results = [
                 r
@@ -61,132 +141,111 @@ class ProductCatalogTool:
 
         sort_hint = parsed.get("sort")
         if sort_hint == "price_asc":
-            results = sorted(results, key=lambda r: r.get("price", 0))
+            results = sorted(results, key=lambda r: r.get("price") or 0)
         elif sort_hint == "delivery_time_days_asc":
-            results = sorted(results, key=lambda r: r.get("delivery_time_days", 0))
+            results = sorted(results, key=lambda r: r.get("delivery_time_days") or 0)
 
-        return results
+        if not results and cleaned_query and has_numeric:
+            try:
+                results = list(self.index.items)
+            except FileNotFoundError:
+                results = []
+            if max_price is not None:
+                results = [
+                    r
+                    for r in results
+                    if r.get("price") is not None and r["price"] <= max_price
+                ]
+            if min_price is not None:
+                results = [
+                    r
+                    for r in results
+                    if r.get("price") is not None and r["price"] >= min_price
+                ]
+            if min_rating is not None:
+                results = [
+                    r
+                    for r in results
+                    if r.get("rating") is not None and r["rating"] >= min_rating
+                ]
+            if category:
+                results = [
+                    r
+                    for r in results
+                    if r.get("category") and r["category"].lower() == category
+                ]
+            if sort_hint == "price_asc":
+                results = sorted(results, key=lambda r: r.get("price") or 0)
+            elif sort_hint == "delivery_time_days_asc":
+                results = sorted(
+                    results, key=lambda r: r.get("delivery_time_days") or 0
+                )
 
-    def retrieve(self, query: str, k: int = 5):
-        results = self.search(query=query, k=k)
-        if not results:
-            return "No matching products found."
-        return json.dumps(results, indent=2)
+        return results[: _clamp_k(k)]
 
 
-class ProductFAQTool:
-    def __init__(self, path: str = FAQ_PATH):
-        self.faqs = load_json(path, [])
+class ProductFAQTool(VectorSearchTool):
+    def __init__(self, index_path: Path, meta_path: Path, embedder: Embedder):
+        super().__init__(index_path, meta_path, embedder, "No matching FAQs found.")
 
-    def search(self, query: str, k: int = 5):
-        query = normalize_query(query)
-        if not query:
+
+class CompanyPolicyTool(VectorSearchTool):
+    def __init__(self, index_path: Path, meta_path: Path, embedder: Embedder):
+        super().__init__(
+            index_path, meta_path, embedder, "No matching policy entries found."
+        )
+
+
+class OrderDatabaseTool(VectorSearchTool):
+    def __init__(self, index_path: Path, meta_path: Path, embedder: Embedder):
+        super().__init__(index_path, meta_path, embedder, "No matching orders found.")
+
+    def search(self, query: str, k: int = 5) -> list[dict]:
+        normalized = normalize_query(query)
+        try:
+            if re.fullmatch(r"c\d{4}", normalized):
+                return [
+                    order
+                    for order in self.index.items
+                    if normalize_query(order.get("customer_id", "")) == normalized
+                ][: _clamp_k(k)]
+            if re.fullmatch(r"o\d{4}", normalized):
+                return [
+                    order
+                    for order in self.index.items
+                    if normalize_query(order.get("order_id", "")) == normalized
+                ][: _clamp_k(k)]
+        except FileNotFoundError:
             return []
-
-        scored = []
-        for product in self.faqs:
-            product_name = product.get("product_name", "")
-            product_id = product.get("product_id", "")
-            for faq in product.get("faqs", []):
-                score = 0
-                score += score_field(query, product_name, 2)
-                score += score_field(query, product_id, 2)
-                score += score_field(query, faq.get("question", ""), 3)
-                score += score_field(query, faq.get("answer", ""), 1)
-                if score > 0:
-                    scored.append(
-                        {
-                            "score": score,
-                            "item": {
-                                "product_id": product_id,
-                                "product_name": product_name,
-                                "question": faq.get("question", ""),
-                                "answer": faq.get("answer", ""),
-                            },
-                        }
-                    )
-
-        return rank_results(scored, k)
-
-    def retrieve(self, query: str, k: int = 5):
-        results = self.search(query=query, k=k)
-        if not results:
-            return "No matching FAQs found."
-        return json.dumps(results, indent=2)
-
-
-class CompanyPolicyTool:
-    def __init__(self, path: str = POLICY_PATH):
-        self.policies = load_json(path, {}).get("policy_document", {})
-        self.entries = flatten_policy(self.policies)
-
-    def search(self, query: str, k: int = 5):
-        query = normalize_query(query)
-        if not query:
-            return []
-
-        scored = []
-        for entry in self.entries:
-            score = 0
-            score += score_field(query, entry.get("section", ""), 2)
-            score += score_field(query, entry.get("text", ""), 3)
-            if score > 0:
-                scored.append({"score": score, "item": entry})
-
-        return rank_results(scored, k)
-
-    def retrieve(self, query: str, k: int = 5):
-        results = self.search(query=query, k=k)
-        if not results:
-            return "No matching policy entries found."
-        return json.dumps(results, indent=2)
-
-
-class OrderDatabaseTool:
-    def __init__(self, path: str = ORDERS_PATH):
-        self.orders = load_json(path, [])
-
-    def search(self, query: str, k: int = 5):
-        query = normalize_query(query)
-        if not query:
-            return []
-
-        if re.fullmatch(r"c\d{4}", query):
-            exact = [
-                order
-                for order in self.orders
-                if normalize_query(order.get("customer_id", "")) == query
-            ]
-            return exact[: max(1, int(k))]
-
-        scored = []
-        for order in self.orders:
-            score = 0
-            score += score_field(query, order.get("order_id", ""), 3)
-            score += score_field(query, order.get("customer_id", ""), 2)
-            score += score_field(query, order.get("order_status", ""), 2)
-            score += score_field(query, order.get("order_date", ""), 1)
-            for product in order.get("products", []):
-                score += score_field(query, product.get("product_name", ""), 2)
-                score += score_field(query, product.get("product_id", ""), 2)
-            if score > 0:
-                scored.append({"score": score, "item": order})
-
-        return rank_results(scored, k)
-
-    def retrieve(self, query: str, k: int = 5):
-        results = self.search(query=query, k=k)
-        if not results:
-            return "No matching orders found."
-        return json.dumps(results, indent=2)
+        return super().search(query, k=k)
 
 
 class KnowledgeBaseTools:
-    def __init__(self, customer_id: str | None = None):
-        self.catalog = ProductCatalogTool()
-        self.faq = ProductFAQTool()
-        self.policy = CompanyPolicyTool()
-        self.orders = OrderDatabaseTool()
+    def __init__(
+        self,
+        customer_id: str | None = None,
+        embed_model: str | None = None,
+        index_dir: Path | None = None,
+    ):
+        embed_config = EmbeddingConfig(
+            model_name=embed_model or EmbeddingConfig().model_name
+        )
+        embedder = Embedder(embed_config)
+        index_root = index_dir or INDEX_DIR
+
+        self.catalog = CatalogSearchTool(
+            index_root / "catalog.faiss", index_root / "catalog_meta.json", embedder
+        )
+        self.faq = ProductFAQTool(
+            index_root / "faq.faiss", index_root / "faq_meta.json", embedder
+        )
+        self.policy = CompanyPolicyTool(
+            index_root / "policy.faiss", index_root / "policy_meta.json", embedder
+        )
+        self.orders = OrderDatabaseTool(
+            index_root / "orders.faiss", index_root / "orders_meta.json", embedder
+        )
+
         self.customer_id = customer_id
 
     def _resolve_customer_id(self, customer_id: str | None):
@@ -212,12 +271,13 @@ class KnowledgeBaseTools:
             "reason": message,
             "ticket_id": ticket_id,
         }
-        log_path = os.path.join(DATA_DIR, "action_log.jsonl")
-        with open(log_path, "a") as f:
+        log_path = DATA_DIR / "action_log.jsonl"
+        with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(payload) + "\n")
 
     def _find_order(self, order_id: str):
-        for order in self.orders.orders:
+        orders = load_json(str(ORDERS_PATH), [])
+        for order in orders:
             if order.get("order_id") == order_id:
                 return order
         return None
@@ -354,10 +414,16 @@ class KnowledgeBaseTools:
             return self.policy.retrieve(query=query, k=k)
         if mode in {"orders", "order"}:
             normalized = normalize_query(query)
-            if normalized in {"orders", "order", "my orders", "order history", "previous orders"}:
+            if normalized in {
+                "orders",
+                "order",
+                "my orders",
+                "order history",
+                "previous orders",
+            }:
                 query = self.customer_id or query
             return self.orders.retrieve(query=query, k=k)
-        if mode in {"catalog+faq"}:
+        if mode in {"catalog+faq", "catalog_faq", "catalog+faqs"}:
             combined = {
                 "catalog": self.catalog.search(query=query, k=k),
                 "faq": self.faq.search(query=query, k=k),
@@ -365,6 +431,33 @@ class KnowledgeBaseTools:
             return json.dumps(combined, indent=2)
         return f"Unknown mode '{mode}'."
 
+    def execute_tool_call(
+        self, tool_name: str | None, args: dict | None, default_query: str = ""
+    ) -> str:
+        tool_name = (tool_name or "").strip()
+        args = args or {}
 
-class CatalogSearch(ProductCatalogTool):
+        if tool_name == "retrieve":
+            query = args.get("query") or default_query
+            mode = args.get("mode") or "catalog"
+            k = _clamp_k(args.get("k", 5))
+            return self.retrieve(query=query, mode=mode, k=k)
+
+        if tool_name == "cancel_order":
+            order_id = args.get("order_id") or _extract_order_id(default_query)
+            if not order_id:
+                return "Missing order_id for cancellation."
+            return self.cancel_order(order_id=order_id)
+
+        if tool_name == "initiate_return":
+            order_id = args.get("order_id") or _extract_order_id(default_query)
+            product_id = args.get("product_id") or _extract_product_id(default_query)
+            if not order_id or not product_id:
+                return "Missing order_id or product_id for return."
+            return self.initiate_return(order_id=order_id, product_id=product_id)
+
+        return f"Unknown tool '{tool_name}'."
+
+
+class CatalogSearch(CatalogSearchTool):
     pass
