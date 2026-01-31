@@ -1,0 +1,142 @@
+{
+  "model": "sentence-transformers/all-MiniLM-L6-v2",
+  "count": 34,
+  "items": [
+    {
+      "section": "return and refund policies > eligibility and timeline > Return Window",
+      "text": "Customers have up to 30 days from the date of delivery to request a return or exchange."
+    },
+    {
+      "section": "return and refund policies > eligibility and timeline > Condition",
+      "text": "Items must be unused, in their original packaging, and include all tags and proof of purchase."
+    },
+    {
+      "section": "return and refund policies > eligibility and timeline > Non-Returnable Items",
+      "text": "Products that are personalized, perishable, or marked as final sale are non-returnable."
+    },
+    {
+      "section": "return and refund policies > eligibility and timeline > Exceptions",
+      "text": "For hygiene and safety reasons, certain personal care products, consumables, and digital downloads cannot be returned."
+    },
+    {
+      "section": "return and refund policies > process for returns > Initiating a Return",
+      "text": "Contact customer support with your order ID and the reason for the return."
+    },
+    {
+      "section": "return and refund policies > process for returns > Initiating a Return",
+      "text": "Documentation such as photos may be requested to confirm product condition."
+    },
+    {
+      "section": "return and refund policies > process for returns > Authorization",
+      "text": "Once approved, you will receive a return authorization and instructions on shipping the item back."
+    },
+    {
+      "section": "return and refund policies > process for returns > Authorization",
+      "text": "Returns sent without authorization may be refused."
+    },
+    {
+      "section": "return and refund policies > process for returns > Shipping Costs",
+      "text": "We cover return shipping for items received damaged, defective, or incorrect."
+    },
+    {
+      "section": "return and refund policies > process for returns > Shipping Costs",
+      "text": "For change-of-mind returns, customers may be responsible for return shipping and any restocking fees."
+    },
+    {
+      "section": "return and refund policies > refunds and exchanges > Modes of Refund",
+      "text": "Refunds can be issued to the original payment method, as store credit, or by exchanging the item for another product."
+    },
+    {
+      "section": "return and refund policies > refunds and exchanges > Processing Time",
+      "text": "Once the returned item passes inspection, refunds are processed within 7-10 business days."
+    },
+    {
+      "section": "return and refund policies > refunds and exchanges > Exchanges",
+      "text": "Exchanges are subject to stock availability."
+    },
+    {
+      "section": "return and refund policies > refunds and exchanges > Exchanges",
+      "text": "If the requested replacement is unavailable, a refund or store credit will be offered."
+    },
+    {
+      "section": "return and refund policies > customer responsibilities",
+      "text": "Customers are expected to use products as intended and not abuse the return policy."
+    },
+    {
+      "section": "return and refund policies > customer responsibilities",
+      "text": "Items should be repacked securely to prevent damage in transit."
+    },
+    {
+      "section": "return and refund policies > customer responsibilities",
+      "text": "Including all original accessories and packaging helps expedite the inspection process."
+    },
+    {
+      "section": "cancellation rules > Policy",
+      "text": "Customers may cancel an order before it has been shipped."
+    },
+    {
+      "section": "cancellation rules > Policy",
+      "text": "Once delivered, the return policy applies."
+    },
+    {
+      "section": "cancellation rules > How to Cancel",
+      "text": "Submit a cancellation request via customer support or your account dashboard using your order ID as soon as possible."
+    },
+    {
+      "section": "cancellation rules > Refund for Cancellations",
+      "text": "If the order is still in processing, it will be cancelled and a refund issued."
+    },
+    {
+      "section": "cancellation rules > Refund for Cancellations",
+      "text": "If payment has been captured, refunds are processed to the original payment method within 7-10 business days."
+    },
+    {
+      "section": "cancellation rules > Non-Cancellable Items",
+      "text": "Customized products, gift cards, and clearance items are generally not eligible for cancellation."
+    },
+    {
+      "section": "cancellation rules > After Dispatch",
+      "text": "Once an order has been shipped, it cannot be cancelled."
+    },
+    {
+      "section": "cancellation rules > After Dispatch",
+      "text": "Instead, customers may initiate a return through the standard return process."
+    },
+    {
+      "section": "delivery timelines > Standard Shipping",
+      "text": "Domestic orders shipped via standard shipping typically arrive within 5-7 business days."
+    },
+    {
+      "section": "delivery timelines > Express Shipping",
+      "text": "Customers can choose express shipping for a faster delivery window of 3-5 business days."
+    },
+    {
+      "section": "delivery timelines > Processing Time",
+      "text": "Orders are processed and dispatched within 24 hours of payment confirmation (excluding weekends and holidays)."
+    },
+    {
+      "section": "delivery timelines > Processing Time",
+      "text": "Orders placed after 4 p.m. are processed the next business day."
+    },
+    {
+      "section": "delivery timelines > Tracking",
+      "text": "Once shipped, customers will receive a tracking link via email or SMS to monitor the shipment status in real time."
+    },
+    {
+      "section": "delivery timelines > Variability",
+      "text": "Delivery timelines are estimates and may vary due to weather, unforeseen logistic issues, or regional restrictions."
+    },
+    {
+      "section": "delivery timelines > Variability",
+      "text": "Remote locations may require additional transit time."
+    },
+    {
+      "section": "contact information",
+      "text": "For questions about returns, refunds, cancellations, or delivery timelines, please contact our customer care team through the support portal or by emailing our helpdesk."
+    },
+    {
+      "section": "contact information",
+      "text": "We aim to respond to all enquiries within one business day."
+    }
+  ]
+}
