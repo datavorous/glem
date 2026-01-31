@@ -414,14 +414,27 @@ class KnowledgeBaseTools:
             return self.policy.retrieve(query=query, k=k)
         if mode in {"orders", "order"}:
             normalized = normalize_query(query)
-            if normalized in {
+            generic_orders = {
                 "orders",
                 "order",
                 "my orders",
                 "order history",
                 "previous orders",
-            }:
+                "recent orders",
+                "recent order",
+                "my recent orders",
+                "order list",
+                "my order list",
+            }
+            if normalized in generic_orders:
                 query = self.customer_id or query
+            elif (
+                self.customer_id
+                and "order" in normalized
+                and not _extract_order_id(query)
+                and not _extract_customer_id(query)
+            ):
+                query = self.customer_id
             return self.orders.retrieve(query=query, k=k)
         if mode in {"catalog+faq", "catalog_faq", "catalog+faqs"}:
             combined = {
@@ -441,6 +454,15 @@ class KnowledgeBaseTools:
             query = args.get("query") or default_query
             mode = args.get("mode") or "catalog"
             k = _clamp_k(args.get("k", 5))
+            if mode in {"orders", "order"}:
+                normalized = normalize_query(query)
+                if (
+                    self.customer_id
+                    and "order" in normalized
+                    and not _extract_order_id(query)
+                    and not _extract_customer_id(query)
+                ):
+                    query = self.customer_id
             return self.retrieve(query=query, mode=mode, k=k)
 
         if tool_name == "cancel_order":

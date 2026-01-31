@@ -237,7 +237,7 @@ def _suggest_categories(tools, limit: int = 4):
     return seen
 
 
-def _ensure_order_tool_call(plan, user_input):
+def _ensure_order_tool_call(plan, user_input, tools):
     if not _needs_order_lookup(user_input):
         return plan
 
@@ -251,7 +251,12 @@ def _ensure_order_tool_call(plan, user_input):
         return plan
 
     customer_id = _extract_customer_id(user_input)
-    query = customer_id or user_input
+    if customer_id:
+        query = customer_id
+    elif getattr(tools, "customer_id", None):
+        query = tools.customer_id
+    else:
+        query = user_input
     tool_calls.append(
         {
             "tool": "retrieve",
@@ -375,7 +380,7 @@ class ChatAlita(AlitaEngine):
                     "confidence": 0.0,
                 }
 
-            plan = _ensure_order_tool_call(plan, user_input)
+            plan = _ensure_order_tool_call(plan, user_input, tools)
             plan = _ensure_policy_tool_call(plan, user_input)
             if plan.get("route") in {"tools", "context_answer"}:
                 plan["intent"] = "retrieve"
