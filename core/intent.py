@@ -1,5 +1,4 @@
-import json
-from .alita import AlitaEngine
+from .glem import GlemEngine
 
 INTENT_SCHEMA = {
     "type": "object",
@@ -143,7 +142,7 @@ Return ONLY valid JSON.
 
 class IntentClassifier:
     def __init__(self, engine=None, system_prompt=SYSTEM_PROMPT, schema=INTENT_SCHEMA):
-        self.engine = engine or AlitaEngine()
+        self.engine = engine or GlemEngine()
         self.system_prompt = system_prompt
         self.schema = schema
 

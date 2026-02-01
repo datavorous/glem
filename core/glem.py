@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from groq import Groq
 
 
-class AlitaEngine:
+class GlemEngine:
     def __init__(self, env_key_name: str = "API_KEYS"):
         load_dotenv()
         keys = os.getenv(env_key_name, "").split(",")

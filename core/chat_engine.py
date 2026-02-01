@@ -1,7 +1,7 @@
 import json
 import re
 
-from .alita import AlitaEngine
+from .glem import GlemEngine
 
 
 def build_sliding_window(history, use_memory: bool, max_tokens: int):
@@ -138,7 +138,12 @@ def _is_customer_id_question(text: str) -> bool:
     if not text:
         return False
     text = text.lower()
-    return "customer id" in text or "customerid" in text
+    return (
+        "customer id" in text
+        or "customerid" in text
+        or "custom id" in text
+        or ("customer" in text and "id" in text)
+    )
 
 
 def _is_purchase_intent(text: str) -> bool:
@@ -188,6 +193,43 @@ def _extract_customer_id(text: str):
     if match:
         return match.group(0).upper()
     return None
+
+
+def _is_confirmation(text: str) -> bool:
+    if not text:
+        return False
+    normalized = text.strip().lower()
+    return normalized in {"yes", "y", "confirm", "confirmed", "proceed", "ok", "okay"}
+
+
+def _is_rejection(text: str) -> bool:
+    if not text:
+        return False
+    normalized = text.strip().lower()
+    return normalized in {"no", "n", "cancel", "stop", "never mind", "nevermind"}
+
+
+def _describe_action_request(tool_calls, fallback_text: str) -> str:
+    if not tool_calls:
+        return fallback_text
+    parts = []
+    for call in tool_calls:
+        tool_name = call.get("tool")
+        args = call.get("args") or {}
+        if tool_name == "cancel_order":
+            order_id = args.get("order_id") or _extract_order_id(fallback_text)
+            label = f"cancel order {order_id}" if order_id else "cancel this order"
+            parts.append(label)
+        elif tool_name == "initiate_return":
+            order_id = args.get("order_id") or _extract_order_id(fallback_text)
+            product_id = args.get("product_id") or _extract_product_id(fallback_text)
+            if order_id and product_id:
+                parts.append(f"return {product_id} from order {order_id}")
+            elif order_id:
+                parts.append(f"return an item from order {order_id}")
+            else:
+                parts.append("initiate this return")
+    return " and ".join(parts) if parts else fallback_text
 
 
 def _get_catalog_matches(tools, query: str, k: int = 5):
@@ -322,7 +364,7 @@ def _ensure_policy_tool_call(plan, user_input):
     return updated
 
 
-class ChatAlita(AlitaEngine):
+class ChatGlem(GlemEngine):
     def chat(self, messages, model="openai/gpt-oss-20b", temperature=0.7):
         total_attempts = len(self.api_keys) * 2
 
@@ -354,27 +396,72 @@ class ChatAlita(AlitaEngine):
         max_history_tokens=1500,
         debug=True,
         model="openai/gpt-oss-20b",
+        input_source=None,
+        on_response=None,
     ):
         history = [{"role": "system", "content": system_prompt}]
         tool_runner = (
             tools if hasattr(tools, "execute_tool_call") else _normalize_tools(tools)
         )
         current_focus = {"product_id": None, "product_name": None}
+        pending_action = None
 
         if debug:
             print("[+] Debug logging: ON")
 
+        def _emit_response(text: str):
+            print(f"Glem: {text}")
+            history.append({"role": "assistant", "content": text})
+            if on_response:
+                on_response(text)
+
         while True:
-            user_input = input("\nYou: ")
+            if input_source:
+                user_input = input_source()
+            else:
+                user_input = input("\nYou: ")
+            if user_input is None:
+                continue
             if user_input.lower() in ["quit", "exit"]:
                 break
+
+            if pending_action:
+                if _is_confirmation(user_input):
+                    outputs = []
+                    for call in pending_action.get("tool_calls", []):
+                        tool_name = call.get("tool")
+                        args = dict(call.get("args") or {})
+                        args["confirm"] = True
+                        result = tool_runner.execute_tool_call(
+                            tool_name=tool_name,
+                            args=args,
+                            default_query=pending_action.get("default_query", ""),
+                        )
+                        outputs.append(_format_action_result(tool_name, result))
+                    response_text = " ".join(
+                        output for output in outputs if output
+                    ) or ("I couldn't complete that request.")
+                    history.append({"role": "user", "content": user_input})
+                    pending_action = None
+                    _emit_response(response_text)
+                    continue
+
+                if _is_rejection(user_input):
+                    pending_action = None
+                    history.append({"role": "user", "content": user_input})
+                    _emit_response("Okay, I won't proceed with that.")
+                    continue
+
+                _emit_response(
+                    "Please confirm the action by replying 'confirm', or say 'no' to cancel."
+                )
+                continue
 
             if _is_customer_id_question(user_input) and getattr(
                 tools, "customer_id", None
             ):
                 response_text = f"Your customer ID is {tools.customer_id}."
-                print(f"Alita: {response_text}")
-                history.append({"role": "assistant", "content": response_text})
+                _emit_response(response_text)
                 continue
 
             if _is_purchase_intent(user_input):
@@ -387,8 +474,7 @@ class ChatAlita(AlitaEngine):
                     )
                 else:
                     response_text = "Which product would you like to buy?"
-                print(f"Alita: {response_text}")
-                history.append({"role": "assistant", "content": response_text})
+                _emit_response(response_text)
                 continue
 
             plan = classifier.classify(user_input)
@@ -414,28 +500,45 @@ class ChatAlita(AlitaEngine):
             tool_output = ""
             if plan.get("route") == "tools" and plan.get("tool_calls"):
                 action_tools = {"cancel_order", "initiate_return"}
-                if (
-                    hasattr(tool_runner, "execute_tool_call")
-                    and any(call.get("tool") in action_tools for call in plan.get("tool_calls", []))
-                ):
-                    outputs = []
-                    for call in plan.get("tool_calls", []):
-                        tool_name = call.get("tool")
-                        if tool_name not in action_tools:
-                            continue
-                        args = dict(call.get("args") or {})
-                        result = tool_runner.execute_tool_call(
-                            tool_name=tool_name,
-                            args=args,
+                has_action = any(
+                    call.get("tool") in action_tools
+                    for call in plan.get("tool_calls", [])
+                )
+                if has_action and hasattr(tool_runner, "execute_tool_call"):
+                    non_action_calls = [
+                        call
+                        for call in plan.get("tool_calls", [])
+                        if call.get("tool") not in action_tools
+                    ]
+                    if non_action_calls:
+                        print("[+] Searching...")
+                        tool_output = _execute_tool_calls(
+                            tool_calls=non_action_calls,
+                            tool_runner=tool_runner,
                             default_query=user_input,
+                            debug=debug,
                         )
-                        outputs.append(_format_action_result(tool_name, result))
-                    response_text = " ".join(output for output in outputs if output) or (
-                        "I couldn't complete that request."
+                        if debug:
+                            print(
+                                "[LOG] tool_output =", tool_output.strip() or "<empty>"
+                            )
+
+                    pending_action = {
+                        "tool_calls": [
+                            call
+                            for call in plan.get("tool_calls", [])
+                            if call.get("tool") in action_tools
+                        ],
+                        "default_query": user_input,
+                    }
+                    action_summary = _describe_action_request(
+                        pending_action.get("tool_calls", []), user_input
                     )
-                    print(f"Alita: {response_text}")
                     history.append({"role": "user", "content": user_input})
-                    history.append({"role": "assistant", "content": response_text})
+                    _emit_response(
+                        "I can proceed to "
+                        f"{action_summary}. Reply 'confirm' to continue or 'no' to cancel."
+                    )
                     continue
 
                 print("[+] Searching...")
@@ -516,8 +619,7 @@ class ChatAlita(AlitaEngine):
                 history.append({"role": "user", "content": user_input})
                 if tool_message:
                     history.append({"role": "assistant", "content": tool_message})
-                print(f"Alita: {response_text}")
-                history.append({"role": "assistant", "content": response_text})
+                _emit_response(response_text)
                 continue
 
             if plan.get("route") == "tools" and catalog_query and catalog_matches:
@@ -554,10 +656,7 @@ class ChatAlita(AlitaEngine):
                                 history.append(
                                     {"role": "assistant", "content": tool_message}
                                 )
-                            print(f"Alita: {response_text}")
-                            history.append(
-                                {"role": "assistant", "content": response_text}
-                            )
+                            _emit_response(response_text)
                             continue
 
             if plan.get("route") == "tools" and catalog_query and not catalog_matches:
@@ -576,8 +675,7 @@ class ChatAlita(AlitaEngine):
                 history.append({"role": "user", "content": user_input})
                 if tool_message:
                     history.append({"role": "assistant", "content": tool_message})
-                print(f"Alita: {response_text}")
-                history.append({"role": "assistant", "content": response_text})
+                _emit_response(response_text)
                 continue
 
             if catalog_matches:
@@ -609,8 +707,7 @@ class ChatAlita(AlitaEngine):
                 history.append({"role": "user", "content": user_input})
                 if tool_message:
                     history.append({"role": "assistant", "content": tool_message})
-                print(f"Alita: {response_text}")
-                history.append({"role": "assistant", "content": response_text})
+                _emit_response(response_text)
                 continue
 
             history.append({"role": "user", "content": user_input})
@@ -660,5 +757,4 @@ class ChatAlita(AlitaEngine):
                         "is marked non-returnable."
                     )
 
-            print(f"Alita: {response_text}")
-            history.append({"role": "assistant", "content": response_text})
+            _emit_response(response_text)

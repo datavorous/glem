@@ -220,6 +220,74 @@ class OrderDatabaseTool(VectorSearchTool):
         return super().search(query, k=k)
 
 
+class GuardedOrderDatabaseTool(OrderDatabaseTool):
+    def __init__(
+        self,
+        index_path: Path,
+        meta_path: Path,
+        embedder: Embedder,
+        customer_id: str | None = None,
+    ):
+        super().__init__(index_path, meta_path, embedder)
+        self.customer_id = customer_id
+
+    def _normalized_customer_id(self, value: str | None) -> str | None:
+        if not value:
+            return None
+        return normalize_query(value)
+
+    def _matches_current_customer(self, value: str | None) -> bool:
+        if not self.customer_id:
+            return True
+        if not value:
+            return False
+        return self._normalized_customer_id(value) == self._normalized_customer_id(
+            self.customer_id
+        )
+
+    def search(self, query: str, k: int = 5) -> list[dict]:
+        normalized = normalize_query(query)
+        requested_customer = _extract_customer_id(query)
+        if requested_customer and not self._matches_current_customer(
+            requested_customer
+        ):
+            return []
+
+        try:
+            if re.fullmatch(r"c\d{4}", normalized):
+                if not self._matches_current_customer(normalized):
+                    return []
+                return [
+                    order
+                    for order in self.index.items
+                    if normalize_query(order.get("customer_id", "")) == normalized
+                ][: _clamp_k(k)]
+            if re.fullmatch(r"o\d{4}", normalized):
+                results = [
+                    order
+                    for order in self.index.items
+                    if normalize_query(order.get("order_id", "")) == normalized
+                ]
+                if self.customer_id:
+                    results = [
+                        order
+                        for order in results
+                        if self._matches_current_customer(order.get("customer_id"))
+                    ]
+                return results[: _clamp_k(k)]
+        except FileNotFoundError:
+            return []
+
+        results = VectorSearchTool.search(self, query=query, k=k)
+        if self.customer_id:
+            results = [
+                order
+                for order in results
+                if self._matches_current_customer(order.get("customer_id"))
+            ]
+        return results
+
+
 class KnowledgeBaseTools:
     def __init__(
         self,
@@ -242,14 +310,32 @@ class KnowledgeBaseTools:
         self.policy = CompanyPolicyTool(
             index_root / "policy.faiss", index_root / "policy_meta.json", embedder
         )
-        self.orders = OrderDatabaseTool(
-            index_root / "orders.faiss", index_root / "orders_meta.json", embedder
+        self.orders = GuardedOrderDatabaseTool(
+            index_root / "orders.faiss",
+            index_root / "orders_meta.json",
+            embedder,
+            customer_id=customer_id,
         )
 
         self.customer_id = customer_id
 
     def _resolve_customer_id(self, customer_id: str | None):
         return customer_id or self.customer_id
+
+    def _is_other_customer_query(self, query: str | None) -> bool:
+        if not query or not self.customer_id:
+            return False
+        requested = _extract_customer_id(query)
+        if not requested:
+            return False
+        return normalize_query(requested) != normalize_query(self.customer_id)
+
+    def _order_belongs_to_customer(self, order: dict | None, customer_id: str | None):
+        if not order or not customer_id:
+            return False
+        return normalize_query(order.get("customer_id", "")) == normalize_query(
+            customer_id
+        )
 
     def _log_action(
         self,
@@ -301,10 +387,28 @@ class KnowledgeBaseTools:
                 indent=2,
             )
 
+        if customer_id and not self._order_belongs_to_customer(order, customer_id):
+            message = "Order does not belong to this customer."
+            self._log_action(
+                action="cancel_order",
+                customer_id=customer_id,
+                order_id=order_id,
+                product_id=None,
+                result="rejected",
+                message=message,
+                ticket_id=None,
+            )
+            return json.dumps(
+                {"status": "rejected", "message": message, "ticket_id": None},
+                indent=2,
+            )
+
         allowed = {"Placed", "Shipped"}
         if order.get("order_status") not in allowed:
             status = order.get("order_status") or "Unknown"
-            reason = f"Order status is {status}, only Placed or Shipped can be cancelled."
+            reason = (
+                f"Order status is {status}, only Placed or Shipped can be cancelled."
+            )
             message = "Order is not eligible for cancellation."
             self._log_action(
                 action="cancel_order",
@@ -348,6 +452,22 @@ class KnowledgeBaseTools:
         order = self._find_order(order_id)
         if not order:
             message = "Order not found."
+            self._log_action(
+                action="initiate_return",
+                customer_id=customer_id,
+                order_id=order_id,
+                product_id=product_id,
+                result="rejected",
+                message=message,
+                ticket_id=None,
+            )
+            return json.dumps(
+                {"status": "rejected", "message": message, "ticket_id": None},
+                indent=2,
+            )
+
+        if customer_id and not self._order_belongs_to_customer(order, customer_id):
+            message = "Order does not belong to this customer."
             self._log_action(
                 action="initiate_return",
                 customer_id=customer_id,
@@ -427,6 +547,8 @@ class KnowledgeBaseTools:
         if mode in {"policy", "company_policy"}:
             return self.policy.retrieve(query=query, k=k)
         if mode in {"orders", "order"}:
+            if self._is_other_customer_query(query):
+                return "Access denied. You can only access your own orders."
             normalized = normalize_query(query)
             generic_orders = {
                 "orders",
@@ -464,11 +586,24 @@ class KnowledgeBaseTools:
         tool_name = (tool_name or "").strip()
         args = args or {}
 
+        def _confirmation_required(action: str) -> str:
+            return json.dumps(
+                {
+                    "status": "rejected",
+                    "message": "Confirmation required before processing this request.",
+                    "reason": f"confirmation_required:{action}",
+                    "ticket_id": None,
+                },
+                indent=2,
+            )
+
         if tool_name == "retrieve":
             query = args.get("query") or default_query
             mode = args.get("mode") or "catalog"
             k = _clamp_k(args.get("k", 5))
             if mode in {"orders", "order"}:
+                if self._is_other_customer_query(query):
+                    return "Access denied. You can only access your own orders."
                 normalized = normalize_query(query)
                 if (
                     self.customer_id
@@ -480,12 +615,16 @@ class KnowledgeBaseTools:
             return self.retrieve(query=query, mode=mode, k=k)
 
         if tool_name == "cancel_order":
+            if args.get("confirm") is not True:
+                return _confirmation_required("cancel_order")
             order_id = args.get("order_id") or _extract_order_id(default_query)
             if not order_id:
                 return "Missing order_id for cancellation."
             return self.cancel_order(order_id=order_id)
 
         if tool_name == "initiate_return":
+            if args.get("confirm") is not True:
+                return _confirmation_required("initiate_return")
             order_id = args.get("order_id") or _extract_order_id(default_query)
             product_id = args.get("product_id") or _extract_product_id(default_query)
             if not order_id or not product_id:
